@@ -1,0 +1,14 @@
+"DESCRIPTION","DURATION IN MS","NAME","PARENT SUITE","START TIME","STATUS","STOP TIME","SUB SUITE","SUITE","TEST CLASS","TEST METHOD"
+"测试JS弹框","17645","test_alert","tests","2026-02-26","broken","2026-02-26","TestUI","test_ui","",""
+"测试多窗口切换","586","test_window","tests","2026-02-26","broken","2026-02-26","TestUI","test_ui","",""
+"
+测试表单提交
+:param page: conftest中定义的fixture
+:param data: 数据驱动传入的测试数据
+","32361","test_form[data0]","tests","2026-02-26","broken","2026-02-26","TestUI","test_ui","",""
+"
+测试表单提交
+:param page: conftest中定义的fixture
+:param data: 数据驱动传入的测试数据
+","51889","test_form[data1]","tests","2026-02-26","broken","2026-02-26","TestUI","test_ui","",""
+"测试内嵌页面iframe","30013","test_iframe","tests","2026-02-26","broken","2026-02-26","TestUI","test_ui","",""

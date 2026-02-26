@@ -17,6 +17,6 @@ class IFramePage(BasePage):
         """
         切换到iframe并输入内容
         """
-        frame = self.page.frame_locator("#mce_0_ifr")
-        frame.locator("#tinymce").clear()
-        frame.locator("#tinymce").fill(content)
+        frame = self.page.frame_locator("#iframe1")
+        frame.locator("#email").fill('1234')
+        frame.locator("#age").fill('18')

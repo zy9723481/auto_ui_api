@@ -56,4 +56,4 @@ class TestUI:
         win = WindowPage(page)
         win.open()
         text = win.open_new_window()
-        assert "New Window" in text
+        assert "Simple page with simple test." in text
