@@ -19,3 +19,22 @@ build/
 # 系统临时文件
 .DS_Store
 Thumbs.db
+
+# 测试报告相关（Allure/HTML报告）
+Report/
+allure-results/
+allure-report/
+htmlcov/
+pytest-report/
+
+# 截图目录（本地/Jenkins）
+screenshot/
+screenshots/
+
+# Python 虚拟环境
+.venv/
+venv/
+env/
+
+# 临时文件
+*.log
