@@ -4,20 +4,25 @@ from playwright.sync_api import sync_playwright
 @pytest.fixture(scope="session")
 def browser():
     """
-    全局唯一浏览器 fixture
-    scope="session"：整个测试只启动一次浏览器
-    新增：使用本地 Chrome 浏览器，无需下载 Playwright 自带版本
+    适配 Linux 服务器的 Playwright 浏览器配置
+    1. 不指定本地 Chrome 路径，使用 Playwright 自带的 Chromium
+    2. 启用 headless=True（Linux 服务器无桌面，必须无界面运行）
+    3. 添加 Linux 必要的启动参数
     """
     with sync_playwright() as p:
+        # 关键修改：去掉 executable_path，使用 Playwright 自带浏览器
         browser = p.chromium.launch(
-            headless=False,  # False=显示浏览器，True=无界面
-            # ******** 核心修改：添加以下两行 ********
-            executable_path=r"D:\chrome-win64\chrome.exe",  # 本地 Chrome 路径
-            args=["--no-sandbox", "--disable-gpu"]  # 避免 Chrome 安全/兼容性报错
+            headless=True,  # Linux 必须开启无界面模式
+            args=[
+                "--no-sandbox",  # Linux 下禁用沙箱（权限问题）
+                "--disable-gpu",  # 禁用 GPU 加速
+                "--disable-dev-shm-usage",  # 解决 Linux 内存不足问题
+                "--remote-debugging-port=9222"  # 可选：调试用
+            ]
         )
-        yield browser       # 提供给测试用例
-        browser.close()    # 测试结束关闭
-
+        yield browser
+        # 测试结束后关闭浏览器
+        browser.close()
 @pytest.fixture(scope="function")
 def page(browser):
     """
