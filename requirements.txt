@@ -13,5 +13,6 @@ webdriver-manager>=4.0.0  # 你conftest.py里用到的ChromeDriver管理库
 
 
 
-
+#2.28新增
+colorlog
 
