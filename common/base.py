@@ -140,7 +140,7 @@ class BasePage:
         """
         通用截图方法（适配两套框架 + 双环境路径）
         :param name: 截图文件名（不含后缀），默认自动生成：error_YYYYMMDD_HHMMSS
-        :return: 无返回值，截图保存到指定目录并打印路径
+        :return: 截图的字节流（bytes），供 allure.attach 使用；同时保存截图文件
         """
         # 生成默认文件名（时间戳，避免重复）
         if not name:
@@ -149,15 +149,27 @@ class BasePage:
         # 拼接完整截图路径（目录 + 文件名 + 后缀）
         screenshot_path = self.screenshot_dir / f"{name}.png"
 
-        if self.is_playwright:
-            # Playwright：全屏截图（full_page=True），保存到指定路径
-            self.driver.screenshot(path=str(screenshot_path), full_page=True)
-        else:
-            # Selenium：保存截图到指定路径
-            self.driver.save_screenshot(str(screenshot_path))
+        # 新增：初始化截图字节流变量
+        screenshot_bytes = None
 
-        # 打印截图路径，便于调试/日志查看
+        if self.is_playwright:
+            # Playwright 优化：先获取字节流，再保存文件（一步到位）
+            screenshot_bytes = self.driver.screenshot(full_page=True)  # 获取字节流
+            # 将字节流写入文件（保留原有保存逻辑）
+            with open(screenshot_path, "wb") as f:
+                f.write(screenshot_bytes)
+        else:
+            # Selenium：先保存文件，再读取字节流
+            self.driver.save_screenshot(str(screenshot_path))
+            # 读取保存的截图文件，转为字节流
+            with open(screenshot_path, "rb") as f:
+                screenshot_bytes = f.read()
+
+        # 打印截图路径，便于调试/日志查看（保留原有逻辑）
         print(f"截图已保存：{screenshot_path}")
+
+        # 核心新增：返回截图字节流，供 allure.attach 使用
+        return screenshot_bytes
 
     # ===================== 通用页面操作方法 =====================
     def open(self, url):
