@@ -81,6 +81,7 @@ def selenium_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
 
+
     # 环境差异化配置
     if is_jenkins:
         # Jenkins/Linux 环境：无界面 + 权限适配
@@ -96,6 +97,8 @@ def selenium_driver():
     # 自动下载 chromedriver（兼容所有系统）
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
+    # 设置隐式等待时间（元素查找超时时间）30秒
+    driver.implicitly_wait(30)
     yield driver
     driver.quit()
 

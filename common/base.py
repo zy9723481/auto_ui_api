@@ -6,11 +6,19 @@
 3. 提供通用定位器转换、元素等待、截图、页面操作等基础能力
 4. 所有业务页面对象（如 FormPage、IFramePage）均继承此类
 """
+import re
 from pathlib import Path
 import os
 from datetime import datetime
+
+from selenium.common import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.action_chains import ActionChains
 # Selenium 定位枚举（父类统一导入，子类无需重复导入）
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC  #
+
+from common.Logger import log  # 日志模块
 
 
 class BasePage:
@@ -33,6 +41,9 @@ class BasePage:
         self.is_playwright = self._is_playwright_driver()
         # 初始化截图保存目录（适配本地/Jenkins）
         self.screenshot_dir = self._get_screenshot_dir()
+        # 新增：默认显式等待超时时间（SELENIUM单独使用）
+        self.wait_timeout = 15
+
 
     def _is_playwright_driver(self):
         """
@@ -191,3 +202,198 @@ class BasePage:
             elem = self.driver.find_element(*locator)
             elem.clear()
             elem.send_keys(text)
+# ===================== SEL页面单独封装操作方法 =====================
+    def element_by_click_two(self, element):
+        """双击指定元素"""
+        # 新增：显式等待元素可点击
+        try:
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                EC.element_to_be_clickable(element if isinstance(element, tuple) else (By.XPATH, element))
+                if not hasattr(element, 'tag_name') else EC.element_to_be_clickable(element)
+            )
+        except TimeoutException:
+            log.warning("元素不可点击，双击操作失败")
+        ActionChains(self.driver).double_click(element).perform()
+
+    def element_by_send_keys_ENTER(self, value):
+        """处理弹窗确认/取消操作：value==1 确认弹窗，0 取消弹窗"""
+        # 新增：显式等待弹窗出现
+        try:
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                EC.alert_is_present()
+            )
+        except TimeoutException:
+            log.warning("未检测到弹窗，确认/取消操作失败")
+            return
+        if value == 1:
+            self.driver.switch_to.alert.accept()
+        elif value == 0:
+            self.driver.switch_to.alert.dismiss()
+
+
+    def quit_close(self):
+        """关闭当前标签页（清除cookie）"""
+        self.driver.delete_all_cookies()
+        self.driver.close()
+
+    def quit(self):
+        """退出浏览器"""
+        self.driver.quit()
+
+    def Find_element(self, type, text):
+        """定位元素（兼容多种定位方式）"""
+        try:
+            # 新增：根据定位类型构建显式等待条件
+            locator_map = {
+                'xpath': (By.XPATH, text),
+                'id': (By.ID, text),
+                'name': (By.NAME, text),
+                'css_selector': (By.CSS_SELECTOR, text),
+                'link_text': (By.LINK_TEXT, text)
+            }
+            if type in locator_map:
+                # 显式等待元素存在
+                WebDriverWait(self.driver, self.wait_timeout).until(
+                    EC.presence_of_element_located(locator_map[type])
+                )
+                return self.driver.find_element(*locator_map[type])
+        except (NoSuchElementException, TimeoutException) as e:
+            log.error(f"定位元素失败：{type}={text}，错误：{e}")
+            return None
+
+    # def get_image_code(self, image_bytes):
+    #     """
+    #     识别验证码（基于ddddocr）
+    #     验证码识别插件
+    #     """
+    #     try:
+    #         ocr = ddddocr.DdddOcr(show_ad=False)
+    #         text = ocr.classification(image_bytes)
+    #         log.debug(f'验证码识别,识别结果:{text}')
+    #         return text
+    #     except Exception as e:
+    #         log.error(f"验证码识别失败：{e}")
+    #         print(e)
+    #         return None
+
+    def switch_to_frame(self, text):
+        """切换到指定frame（支持index、id、name）"""
+        # 新增：显式等待frame可切换
+        try:
+            if isinstance(text, int):
+                WebDriverWait(self.driver, self.wait_timeout).until(
+                    EC.frame_to_be_available_and_switch_to_it(text)
+                )
+            else:
+                WebDriverWait(self.driver, self.wait_timeout).until(
+                    EC.frame_to_be_available_and_switch_to_it((By.ID if text.isdigit() else By.NAME, text))
+                )
+            return self.driver.switch_to.frame(text)
+        except TimeoutException:
+            log.warning(f"Frame {text} 切换超时")
+            return None
+
+    def switch_to_default_content(self):
+        """切换回最外层的frame（退出所有frame）"""
+        return self.driver.switch_to.default_content()
+
+    def switch_to_parent_frame(self):
+        """切换到父级frame"""
+        return self.driver.switch_to.parent_frame()
+
+    def page_switch(self, i):
+        """"切换浏览器标签页"""
+        # 新增：显式等待标签页数量足够
+        try:
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                lambda d: len(d.window_handles) > i
+            )
+        except TimeoutException:
+            log.warning(f"标签页索引{i}不存在，切换失败")
+            return
+        driver = self.driver.window_handles
+        self.driver.switch_to.window(driver[i])
+
+    def send_txt(self, element):
+        """向指定xpath元素发送回车"""
+        # 新增：显式等待元素存在且可操作
+        try:
+            locator = (By.XPATH, f'{element}')
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                EC.element_to_be_clickable(locator)
+            )
+            self.driver.find_element(*locator).send_keys('\n')
+        except TimeoutException:
+            log.warning(f"元素{element}不可操作，发送回车失败")
+
+    def Execute_script(self, x, y):
+        """页面滚动（指定坐标）"""
+        self.driver.execute_script(f'window.scrollTo({x},{y})')
+        # 新增：等待滚动完成
+
+    def extract_report_number(self, zhengze,text: str):
+        """
+        从文本中提取文字，不（正则匹配caseno=后的字符）
+        :param zhengze: 提取的正则
+        :param text: 包含报告编号的原始文本
+        :return: 提取到的报告编号（无则返回None）
+        """
+        report_number_pattern = re.compile(zhengze, re.UNICODE)
+        match = report_number_pattern.search(text)
+        if match:
+            return match.group(0)
+        else:
+            return None
+
+    def Find_element_send_keys(self, loc, text):
+        """
+        定位元素并输入文本
+        :param loc: 元素定位器 (By.XXX, "value")
+        :param text: 要输入的文本
+        :return: None
+        """
+        # 原有search_element已包含显式等待，无需重复添加
+        input_text = self.search_element(loc)
+        input_text.clear()
+        input_text.send_keys(text)
+
+    def Find_element_clicks(self, loc):
+        """
+        定位元素并点击
+        :param loc: 元素定位器 (By.XXX, "value")
+        :return: None
+        """
+        # 原有search_element已包含显式等待，无需重复添加
+        input_text = self.search_element(loc)
+        input_text.click()
+
+    def search_element(self, loc, timeout=15):
+        """
+        定位元素（显式等待）- 增强版查找
+        :param loc: 定位器 (定位方式,定位值) 示例:(By.ID,"com.xx.xx")
+        :param timeout: 超时时间（默认15秒）
+        :return: 定位到的元素
+        """
+        return WebDriverWait(self.driver, timeout).until(lambda x: x.find_element(*loc))
+
+    def find_element_in_frames(self, loc):
+        """
+        遍历所有frame查找指定元素
+        :param loc: 元素定位器
+        :return: 找到元素所在的frame（无则返回None）
+        """
+        frames = self.driver.find_elements(By.TAG_NAME, 'frame') + self.driver.find_elements(By.TAG_NAME, 'iframe')
+        for frame in frames:
+            try:
+                self.driver.switch_to.frame(frame)
+                # 新增：显式等待元素在frame内可定位
+                element = WebDriverWait(self.driver, self.wait_timeout).until(
+                    EC.presence_of_element_located(loc)
+                )
+                if element:
+                    return frame
+            except:
+                pass
+            finally:
+                self.driver.switch_to.default_content()
+        return None
