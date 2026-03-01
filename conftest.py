@@ -1,6 +1,7 @@
 import os
 import sys
 import platform
+import re
 import pytest
 from playwright.sync_api import sync_playwright
 from selenium import webdriver
@@ -33,23 +34,19 @@ def get_system_type():
 
 def get_browser_driver_path():
     """
-    核心：根据你实际的目录结构，拼接 Chrome 浏览器和 ChromeDriver 的绝对路径
-    实际目录结构（从你的终端输出提取）：
-    auto_ui_api/
-    ├── browser/
-    │   ├── windows/Chrome/chrome.exe                # Windows Chrome 路径
-    │   └── linux/chrome-headless-shell-linux64/chrome-headless-shell  # Linux Chrome 无头版路径
-    ├── driver/
-    │   ├── windows/chromedriver-win64/chromedriver.exe  # Windows ChromeDriver 路径
-    │   └── linux/chromedriver-linux64/chromedriver      # Linux ChromeDriver 路径
+    核心：根据环境动态返回 Chrome 浏览器和 ChromeDriver 的绝对路径
+    适配逻辑：
+    - Windows/本地：使用项目内的 Chrome/Driver 路径
+    - Linux/Jenkins：优先使用系统安装的 Chrome + Jenkins 工作目录的 Driver（兜底用项目内路径）
     """
     # 项目根目录（当前文件所在目录，即 auto_ui_api/）
     project_root = os.path.dirname(os.path.abspath(__file__))
     sys_type = get_system_type()
+    is_jenkins = is_jenkins_env()
 
-    # ========== 拼接 Chrome 浏览器路径（适配你的实际多级目录） ==========
+    # ========== 拼接 Chrome 浏览器路径（核心适配 Jenkins/Linux） ==========
     if sys_type == "windows":
-        # Windows Chrome 路径：browser/windows/Chrome/chrome.exe
+        # Windows 本地：使用项目内 Chrome 路径
         chrome_path = os.path.join(
             project_root,
             "browser",
@@ -58,18 +55,22 @@ def get_browser_driver_path():
             "chrome.exe"
         )
     else:
-        # Linux Chrome 无头版路径：browser/linux/chrome-headless-shell-linux64/chrome-headless-shell
-        chrome_path = os.path.join(
+        # Linux/Jenkins 环境：优先用系统安装的 Chrome（已装在 /opt/google/chrome/google-chrome）
+        jenkins_chrome_path = "/opt/google/chrome/google-chrome"
+        # 兜底：项目内 Linux 无头版路径
+        project_chrome_path = os.path.join(
             project_root,
             "browser",
             "linux",
             "chrome-headless-shell-linux64",
             "chrome-headless-shell"
         )
+        # 优先用系统 Chrome，不存在再用项目内的
+        chrome_path = jenkins_chrome_path if os.path.exists(jenkins_chrome_path) else project_chrome_path
 
-    # ========== 拼接 ChromeDriver 路径（适配你的实际多级目录） ==========
+    # ========== 拼接 ChromeDriver 路径（适配 Jenkins/Linux 实际路径） ==========
     if sys_type == "windows":
-        # Windows ChromeDriver 路径：driver/windows/chromedriver-win64/chromedriver.exe
+        # Windows 本地：使用项目内 Driver 路径
         driver_path = os.path.join(
             project_root,
             "driver",
@@ -78,21 +79,41 @@ def get_browser_driver_path():
             "chromedriver.exe"
         )
     else:
-        # Linux ChromeDriver 路径：driver/linux/chromedriver-linux64/chromedriver
-        driver_path = os.path.join(
+        # Linux/Jenkins 环境：优先用 Jenkins 工作目录的 Driver（手动下载的路径）
+        jenkins_driver_path = "/root/.jenkins/workspace/driver/linux/chromedriver-linux64/chromedriver"
+        # 兜底：项目内 Linux Driver 路径
+        project_driver_path = os.path.join(
             project_root,
             "driver",
             "linux",
             "chromedriver-linux64",
             "chromedriver"
         )
+        # 优先用 Jenkins 工作目录的 Driver，不存在再用项目内的
+        driver_path = jenkins_driver_path if os.path.exists(jenkins_driver_path) else project_driver_path
 
-    # 验证路径是否存在（调试用，可注释）
-    print(f"🔍 系统类型：{sys_type}")
+    # 验证路径是否存在（调试用，可保留）
+    print(f"🔍 系统类型：{sys_type} | Jenkins 环境：{is_jenkins}")
     print(f"🔍 Chrome 路径：{chrome_path} | 存在：{os.path.exists(chrome_path)}")
     print(f"🔍 ChromeDriver 路径：{driver_path} | 存在：{os.path.exists(driver_path)}")
 
     return chrome_path, driver_path
+
+
+def get_chrome_major_version(chrome_path):
+    """获取 Chrome 主版本号（用于匹配 Driver 版本）"""
+    try:
+        if get_system_type() == "windows":
+            import subprocess
+            result = subprocess.check_output(f'"{chrome_path}" --version', shell=True, text=True, stderr=subprocess.STDOUT)
+        else:
+            result = os.popen(f'"{chrome_path}" --version').read()
+        # 提取主版本号（如 138/145）
+        major_version = re.search(r'Chrome (\d+)', result).group(1)
+        return major_version
+    except Exception as e:
+        print(f"⚠️ 获取 Chrome 版本失败：{e}，将使用最新版 Driver")
+        return None
 
 
 # ===================== Playwright 兼容配置（修正 Chrome 路径） =====================
@@ -100,11 +121,11 @@ def get_browser_driver_path():
 def pw_browser():
     """
     Playwright 浏览器 fixture（兼容本地/Jenkins）
-    核心：使用项目内的 Chrome 路径，而非系统路径
+    核心：Jenkins 优先用系统 Chrome，本地用项目内 Chrome
     """
     is_jenkins = is_jenkins_env()
     sys_type = get_system_type()
-    chrome_path, _ = get_browser_driver_path()  # 复用上面的路径逻辑
+    chrome_path, _ = get_browser_driver_path()  # 复用路径逻辑
 
     with sync_playwright() as p:
         # 公共配置
@@ -117,15 +138,13 @@ def pw_browser():
         }
 
         # 环境差异化配置
-        if not is_jenkins:  # 本地环境（Windows）
-            # 使用项目内的 Chrome 路径（替代硬编码）
+        if not is_jenkins:  # 本地 Windows 环境
             launch_kwargs["executable_path"] = chrome_path
             launch_kwargs["headless"] = False  # 有界面调试
         else:  # Jenkins/Linux 环境
-            # 使用项目内的 Linux Chrome 无头版路径
             launch_kwargs["executable_path"] = chrome_path
             launch_kwargs["headless"] = True  # 无界面运行
-            launch_kwargs["args"].extend(["--disable-gpu"])
+            launch_kwargs["args"].extend(["--disable-gpu", "--ignore-certificate-errors"])
 
         # 启动浏览器
         browser = p.chromium.launch(**launch_kwargs)
@@ -144,7 +163,7 @@ def pw_page(pw_browser):
     page.close()
 
 
-# ===================== Selenium 兼容配置（核心适配实际路径） =====================
+# ===================== Selenium 兼容配置（核心适配 Jenkins） =====================
 @pytest.fixture(scope="session")
 def selenium_driver():
     """
@@ -158,6 +177,38 @@ def selenium_driver():
     # 公共配置
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
+
+    # ===================== 【本地关闭弹窗：登录、密码泄露、更新、通知】 =====================
+    chrome_options.add_argument("--no-first-run")                        # 取消首次运行向导
+    chrome_options.add_argument("--no-default-browser-check")           # 不检查默认浏览器
+    chrome_options.add_argument("--disable-popup-blocking")             # 禁用弹窗拦截
+    chrome_options.add_argument("--disable-notifications")              # 禁用浏览器通知
+    chrome_options.add_argument("--disable-infobars")                  # 禁用顶部黄色提示条
+    chrome_options.add_argument("--safebrowsing-disable-extension-blacklist")
+    chrome_options.add_argument("--safebrowsing-disable-download-protection")
+    chrome_options.add_argument("--disable-save-password-bubble")      # 关闭密码保存提示
+    chrome_options.add_argument("--disable-translate")                 # 关闭翻译提示
+    chrome_options.add_argument("--disable-extensions")                # 禁用扩展
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+    chrome_options.add_argument("--disable-renderer-backgrounding")
+    chrome_options.add_argument("--disable-features=TranslateUI,BraveAds,OptimizationGuide")
+    # 关闭 Google 账号登录弹窗
+    chrome_options.add_argument("--disable-signin-promo")
+    chrome_options.add_argument("--disable-sync")
+    # ===================== 【专门关闭：密码泄露安全提示】 =====================
+    chrome_options.add_argument("--safebrowsing-disable-password-protection")  # 关闭密码泄露警告
+    chrome_options.add_argument("--disable-password-manager-reauthentication")  # 关闭密码管理器二次验证
+    chrome_options.add_argument("--incognito")
+    # 禁用密码管理 + 安全浏览（彻底关掉泄露提示）
+    chrome_options.add_experimental_option("prefs", {
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
+        "profile.default_content_setting_values.notifications": 2,
+        "safebrowsing.enabled": False,
+        "safebrowsing.disable_password_protection": True
+    })
 
     # 环境差异化配置
     if is_jenkins:
