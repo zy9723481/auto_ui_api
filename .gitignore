@@ -38,3 +38,8 @@ env/
 
 # 临时文件
 *.log
+
+#chrom文件
+browser/windows
+#chromdriver文件
+driver/windows

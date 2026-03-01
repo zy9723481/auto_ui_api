@@ -176,13 +176,68 @@ class BasePage:
         """
         打开指定 URL（通用方法，适配两套框架）
         :param url: 目标网址（如 "https://www.example.com"）
+        :raises: 保留原有异常，但增加详细提示信息
         """
-        if self.is_playwright:
-            # Playwright：设置超时 60 秒，等待 DOM 加载完成后返回
-            self.driver.goto(url, timeout=60000, wait_until="domcontentloaded")
-        else:
-            # Selenium：打开指定 URL
-            self.driver.get(url)
+        try:
+            if self.is_playwright:
+                # Playwright：设置超时 60 秒，等待 DOM 加载完成后返回
+                self.driver.goto(url, timeout=60000, wait_until="domcontentloaded")
+                # 新增：Playwright 网络异常检测 + 页面标题校验
+                current_url = self.driver.url
+                page_title = self.driver.title
+                if "about:blank" in current_url and not page_title:
+                    raise ConnectionError(f"Playwright 访问 {url} 失败：页面加载为空（网络/URL错误）")
+            else:
+                # Selenium：打开指定 URL
+                self.driver.get(url)
+                # 新增：Selenium 页面标题校验（快速判断是否加载成功）
+                page_title = self.driver.title
+                if page_title == "" or "无法访问" in page_title:
+                    raise ConnectionError(f"Selenium 访问 {url} 失败：页面标题异常（{page_title}）")
+
+            # 通用提示：打印成功信息（便于调试）
+            print(f"✅ 成功打开 URL：{url}，当前页面标题：{page_title}")
+
+        except Exception as e:
+            # 新增：分类输出异常提示，精准定位问题
+            error_type = type(e).__name__
+            if "ConnectionError" in error_type or "TimeoutError" in error_type:
+                error_msg = (
+                    f"\n❌ 网络访问失败！\n"
+                    f"  目标 URL：{url}\n"
+                    f"  使用框架：{'Playwright' if self.is_playwright else 'Selenium'}\n"
+                    f"  错误类型：{error_type}\n"
+                    f"  错误详情：{str(e)[:200]}  # 只截取前200字符，避免日志过长\n"
+                    f"  排查建议：\n"
+                    f"    1. 手动打开浏览器访问 {url} 验证网络连通性\n"
+                    f"    2. 检查是否需要配置代理（如服务器/内网环境）\n"
+                    f"    3. 确认 URL 是否正确（是否多/少空格、拼写错误）"
+                )
+            elif "TimeoutError" in error_type:
+                error_msg = (
+                    f"\n❌ 页面加载超时！\n"
+                    f"  目标 URL：{url}\n"
+                    f"  使用框架：{'Playwright' if self.is_playwright else 'Selenium'}\n"
+                    f"  超时时间：60秒\n"
+                    f"  排查建议：\n"
+                    f"    1. 检查目标网站是否响应缓慢\n"
+                    f"    2. 延长超时时间（修改 timeout 参数）\n"
+                    f"    3. 验证网络稳定性"
+                )
+            else:
+                # 其他异常（如 URL 格式错误）
+                error_msg = (
+                    f"\n❌ 打开 URL 失败！\n"
+                    f"  目标 URL：{url}\n"
+                    f"  使用框架：{'Playwright' if self.is_playwright else 'Selenium'}\n"
+                    f"  错误类型：{error_type}\n"
+                    f"  错误详情：{str(e)[:200]}"
+                )
+
+            # 打印详细错误提示（控制台/Jenkins 日志可见）
+            print(error_msg)
+            # 重新抛出异常，不影响用例失败标记
+            raise e
 
     def click(self, locator):
         """

@@ -1,5 +1,6 @@
 import os
 import sys
+import platform
 import pytest
 from playwright.sync_api import sync_playwright
 from selenium import webdriver
@@ -7,7 +8,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# ===================== 核心：环境判断工具函数 =====================
+
+# ===================== 核心：环境判断 + 路径配置工具函数 =====================
 def is_jenkins_env():
     """
     判断当前是否为 Jenkins 运行环境
@@ -22,15 +24,88 @@ def is_jenkins_env():
         return True
     return False
 
-# ===================== Playwright 兼容配置（核心修改：复用本地Chrome路径） =====================
+
+def get_system_type():
+    """判断当前系统类型（windows/linux），适配不同版本的Chrome/ChromeDriver"""
+    sys_platform = platform.system().lower()
+    return "windows" if sys_platform == "windows" else "linux"
+
+
+def get_browser_driver_path():
+    """
+    核心：根据你实际的目录结构，拼接 Chrome 浏览器和 ChromeDriver 的绝对路径
+    实际目录结构（从你的终端输出提取）：
+    auto_ui_api/
+    ├── browser/
+    │   ├── windows/Chrome/chrome.exe                # Windows Chrome 路径
+    │   └── linux/chrome-headless-shell-linux64/chrome-headless-shell  # Linux Chrome 无头版路径
+    ├── driver/
+    │   ├── windows/chromedriver-win64/chromedriver.exe  # Windows ChromeDriver 路径
+    │   └── linux/chromedriver-linux64/chromedriver      # Linux ChromeDriver 路径
+    """
+    # 项目根目录（当前文件所在目录，即 auto_ui_api/）
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    sys_type = get_system_type()
+
+    # ========== 拼接 Chrome 浏览器路径（适配你的实际多级目录） ==========
+    if sys_type == "windows":
+        # Windows Chrome 路径：browser/windows/Chrome/chrome.exe
+        chrome_path = os.path.join(
+            project_root,
+            "browser",
+            "windows",
+            "Chrome",
+            "chrome.exe"
+        )
+    else:
+        # Linux Chrome 无头版路径：browser/linux/chrome-headless-shell-linux64/chrome-headless-shell
+        chrome_path = os.path.join(
+            project_root,
+            "browser",
+            "linux",
+            "chrome-headless-shell-linux64",
+            "chrome-headless-shell"
+        )
+
+    # ========== 拼接 ChromeDriver 路径（适配你的实际多级目录） ==========
+    if sys_type == "windows":
+        # Windows ChromeDriver 路径：driver/windows/chromedriver-win64/chromedriver.exe
+        driver_path = os.path.join(
+            project_root,
+            "driver",
+            "windows",
+            "chromedriver-win64",
+            "chromedriver.exe"
+        )
+    else:
+        # Linux ChromeDriver 路径：driver/linux/chromedriver-linux64/chromedriver
+        driver_path = os.path.join(
+            project_root,
+            "driver",
+            "linux",
+            "chromedriver-linux64",
+            "chromedriver"
+        )
+
+    # 验证路径是否存在（调试用，可注释）
+    print(f"🔍 系统类型：{sys_type}")
+    print(f"🔍 Chrome 路径：{chrome_path} | 存在：{os.path.exists(chrome_path)}")
+    print(f"🔍 ChromeDriver 路径：{driver_path} | 存在：{os.path.exists(driver_path)}")
+
+    return chrome_path, driver_path
+
+
+# ===================== Playwright 兼容配置（修正 Chrome 路径） =====================
 @pytest.fixture(scope="session")
 def pw_browser():
     """
     Playwright 浏览器 fixture（兼容本地/Jenkins）
-    核心修复：本地环境强制使用系统Chrome，避免Playwright自带版本路径错误
-    命名前缀 pw_ 区分 selenium，避免冲突
+    核心：使用项目内的 Chrome 路径，而非系统路径
     """
     is_jenkins = is_jenkins_env()
+    sys_type = get_system_type()
+    chrome_path, _ = get_browser_driver_path()  # 复用上面的路径逻辑
+
     with sync_playwright() as p:
         # 公共配置
         launch_kwargs = {
@@ -41,21 +116,22 @@ def pw_browser():
             ]
         }
 
-        # ******** 核心修改：复用本地Chrome绝对路径，解决路径报错 ********
+        # 环境差异化配置
         if not is_jenkins:  # 本地环境（Windows）
-            # Windows 本地 Chrome 路径（根据你的实际路径调整！！！）
-            launch_kwargs["executable_path"] = r"D:\chrome-win64\chrome.exe"
-            # 本地环境：有界面调试（和你单框架一致）
-            launch_kwargs["headless"] = False
-        else:
-            # Jenkins/Linux 环境：无界面 + 禁用GPU（用Playwright自带Chromium）
-            launch_kwargs["headless"] = True
+            # 使用项目内的 Chrome 路径（替代硬编码）
+            launch_kwargs["executable_path"] = chrome_path
+            launch_kwargs["headless"] = False  # 有界面调试
+        else:  # Jenkins/Linux 环境
+            # 使用项目内的 Linux Chrome 无头版路径
+            launch_kwargs["executable_path"] = chrome_path
+            launch_kwargs["headless"] = True  # 无界面运行
             launch_kwargs["args"].extend(["--disable-gpu"])
 
-        # 启动浏览器（兼容本地/Jenkins）
+        # 启动浏览器
         browser = p.chromium.launch(**launch_kwargs)
         yield browser
         browser.close()
+
 
 @pytest.fixture(scope="function")
 def pw_page(pw_browser):
@@ -67,20 +143,21 @@ def pw_page(pw_browser):
     yield page
     page.close()
 
-# ===================== Selenium 兼容配置（保留原有逻辑） =====================
+
+# ===================== Selenium 兼容配置（核心适配实际路径） =====================
 @pytest.fixture(scope="session")
 def selenium_driver():
     """
     Selenium ChromeDriver fixture（兼容本地/Jenkins）
-    自动下载匹配版本的 chromedriver，无需手动管理
+    核心：使用你实际目录中的 Chrome/ChromeDriver，替代自动下载
     """
     is_jenkins = is_jenkins_env()
+    sys_type = get_system_type()
     chrome_options = Options()
 
     # 公共配置
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
-
 
     # 环境差异化配置
     if is_jenkins:
@@ -94,13 +171,29 @@ def selenium_driver():
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--ignore-certificate-errors")  # 忽略证书错误（本地调试）
 
-    # 自动下载 chromedriver（兼容所有系统）
-    service = Service(ChromeDriverManager().install())
+    # ========== 核心：使用项目内的 Chrome/ChromeDriver ==========
+    chrome_path, driver_path = get_browser_driver_path()
+
+    # 1. 指定 Chrome 浏览器二进制文件路径
+    chrome_options.binary_location = chrome_path
+
+    # 2. 处理 ChromeDriver 权限（Linux/Jenkins 必需）
+    if sys_type == "linux" and os.path.exists(driver_path):
+        os.chmod(driver_path, 0o755)  # 赋予执行权限
+
+    # 3. 优先使用项目内的 ChromeDriver，失败则降级自动下载（兜底）
+    try:
+        service = Service(executable_path=driver_path)
+    except Exception as e:
+        print(f"⚠️ 项目内驱动使用失败：{e}，降级为自动下载")
+        service = Service(ChromeDriverManager().install())
+
+    # 启动浏览器
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    # 设置隐式等待时间（元素查找超时时间）30秒
-    driver.implicitly_wait(30)
+    driver.implicitly_wait(30)  # 隐式等待30秒
     yield driver
-    driver.quit()
+    driver.quit()  # 确保关闭浏览器
+
 
 # ===================== 可选：通用驱动 fixture（按需切换框架） =====================
 @pytest.fixture(scope="function", params=["playwright", "selenium"])
