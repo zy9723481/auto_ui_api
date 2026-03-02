@@ -1,0 +1,18 @@
+# 原有依赖
+pytest
+playwright
+pyyaml
+requests
+allure-pytest
+pytest-html
+
+# 新增缺失的依赖
+selenium>=4.0.0  # 核心：补充selenium
+webdriver-manager>=4.0.0  # 你conftest.py里用到的ChromeDriver管理库
+
+
+
+
+#2.28新增
+colorlog
+

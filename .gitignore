@@ -1,22 +1,45 @@
-### AL ###
-#Template for AL projects for Dynamics 365 Business Central
-#launch.json folder
-.vscode/
-#Cache folder
-.alcache/
-#Symbols folder
-.alpackages/
-#Snapshots folder
-.snapshots/
-#Testing Output folder
-.output/
-#Extension App-file
-*.app
-#Rapid Application Development File
-rad.json
-#Translation Base-file
-*.g.xlf
-#License-file
-*.flf
-#Test results file
-TestResults.xml
+# PyCharm IDE 配置
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# 环境配置（可选，若包含敏感信息）
+# config/env.yaml
+
+# 系统临时文件
+.DS_Store
+Thumbs.db
+
+# 测试报告相关（Allure/HTML报告）
+Report/
+allure-results/
+allure-report/
+htmlcov/
+pytest-report/
+
+# 截图目录（本地/Jenkins）
+screenshot/
+screenshots/
+
+# Python 虚拟环境
+.venv/
+venv/
+env/
+
+# 临时文件
+*.log
+
+#chrom文件
+browser/
+#chromdriver文件
+driver/
