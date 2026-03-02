@@ -40,6 +40,6 @@ env/
 *.log
 
 #chrom文件
-browser/windows
+browser/
 #chromdriver文件
-driver/windows
+driver/
